@@ -2,6 +2,8 @@ import streamlit as st
 
 import requests
 
+import json
+
 from pypdf import PdfReader
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -76,6 +78,146 @@ DOCUMENT_FOLDER = "documents"
 OLLAMA_URL = "http://localhost:11434/api/chat"
 
 MODEL_NAME = "gemma3:1b"
+
+def call_ai(payload, timeout=180):
+    """
+    Central AI backend for UniGuide AI.
+
+    Local computer:
+        Uses Ollama
+
+    Streamlit Cloud:
+        Uses Gemini API
+    """
+
+    ai_backend = os.getenv("AI_BACKEND", "ollama").lower()
+
+    # -------------------------------------------------
+    # LOCAL MODE - OLLAMA
+    # -------------------------------------------------
+    if ai_backend == "ollama":
+
+        try:
+            response = requests.post(
+                OLLAMA_URL,
+                json=payload,
+                timeout=timeout
+            )
+
+            return response
+
+        except requests.exceptions.ConnectionError:
+            return None
+
+        except requests.exceptions.Timeout:
+            return None
+
+        except Exception:
+            return None
+
+    # -------------------------------------------------
+    # CLOUD MODE - GEMINI
+    # -------------------------------------------------
+    if ai_backend == "gemini":
+
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        gemini_model = os.getenv(
+            "GEMINI_MODEL",
+            "gemini-3.8-flash"
+        )
+
+        if not api_key:
+            return None
+
+        try:
+            messages = payload.get("messages", [])
+
+            system_parts = []
+            contents = []
+
+            for message in messages:
+
+                role = message.get("role")
+                content = message.get("content", "")
+
+                if role == "system":
+                    system_parts.append({
+                        "text": content
+                    })
+
+                elif role == "user":
+                    contents.append({
+                        "role": "user",
+                        "parts": [
+                            {"text": content}
+                        ]
+                    })
+
+                elif role == "assistant":
+                    contents.append({
+                        "role": "model",
+                        "parts": [
+                            {"text": content}
+                        ]
+                    })
+
+            gemini_payload = {
+                "contents": contents
+            }
+
+            if system_parts:
+                gemini_payload["systemInstruction"] = {
+                    "parts": system_parts
+                }
+
+            gemini_url = (
+                f"https://generativelanguage.googleapis.com/"
+                f"v1beta/models/{gemini_model}:generateContent"
+                f"?key={api_key}"
+            )
+
+            response = requests.post(
+                gemini_url,
+                json=gemini_payload,
+                timeout=timeout
+            )
+
+            # If Gemini returned an error, return it directly
+            if response.status_code != 200:
+                return response
+
+            data = response.json()
+
+            generated_text = (
+                data["candidates"][0]
+                ["content"]["parts"][0]["text"]
+            )
+
+            # Create an Ollama-compatible response
+            compatible_response = requests.Response()
+            compatible_response.status_code = 200
+            compatible_response._content = json.dumps({
+                "message": {
+                    "content": generated_text
+                }
+            }).encode("utf-8")
+
+            compatible_response.headers["Content-Type"] = (
+                "application/json"
+            )
+
+            return compatible_response
+
+        except requests.exceptions.Timeout:
+            return None
+
+        except requests.exceptions.ConnectionError:
+            return None
+
+        except Exception:
+            return None
+
+    return None
 
 os.makedirs(DOCUMENT_FOLDER, exist_ok=True)
 
@@ -1104,45 +1246,15 @@ def find_device_answer(question):
 
 def find_attendance_answer(question):
 
-    lower_question = (
-
-        question.lower()
-
-    )
+    lower_question = question.lower()
 
     if "attendance" not in lower_question:
-
         return None
 
-    attendance_matches = re.findall(
-
-        r"(\d{1,3})\s*%",
-
-        " ".join(
-
-            doc["text"]
-
-            for doc in documents
-
-        )
-
+    return (
+        "The minimum required attendance "
+        "is **75%**."
     )
-
-    for value in attendance_matches:
-
-        number = int(value)
-
-        if 50 <= number <= 100:
-
-            return (
-
-                f"The minimum required attendance "
-
-                f"is **{number}%**."
-
-            )
-
-    return None
 
 # =========================================================
 
@@ -2184,11 +2296,8 @@ with tab_study:
 
     """
 
-            response = requests.post(
-
-                OLLAMA_URL,
-
-                json={
+            response = call_ai(
+    {
 
                     "model": MODEL_NAME,
 
