@@ -1313,6 +1313,46 @@ def find_attendance_answer(question):
 
 # =========================================================
 
+# LIBRARY RULE CHECKER
+# =========================================================
+def find_library_answer(question):
+    lower_question = question.lower()
+
+    library_keywords = [
+        "library",
+        "books",
+        "borrow",
+        "borrowing",
+        "return book",
+        "library rules"
+    ]
+
+    if not any(keyword in lower_question for keyword in library_keywords):
+        return None
+
+    # Find the library section directly from the loaded university documents.
+    library_matches = []
+    for doc in documents:
+        text = doc["text"]
+        text_lower = text.lower()
+        if "library" in text_lower and any(
+            word in text_lower
+            for word in ["borrow", "book", "return", "due", "penalty"]
+        ):
+            library_matches.append(doc)
+
+    if library_matches:
+        best = library_matches[0]
+        return (
+            f"### 📚 Library Rules\n\n"
+            f"{best['text']}\n\n"
+            f"📄 Source: {best['source']} — Page {best['page']}"
+        )
+
+    return None
+
+# =========================================================
+
 # PASSING MARK CHECKER
 
 # =========================================================
@@ -2797,6 +2837,18 @@ with tab_study:
 
                     )
 
+                elif "library" in question.lower():
+
+                    quick_answer = (
+
+                        find_library_answer(
+
+                            question
+
+                        )
+
+                    )
+
                 if quick_answer:
 
                     st.success(
@@ -3237,6 +3289,14 @@ with tab_chat:
         if not answer:
 
             answer = find_passing_answer(
+
+                user_question
+
+            )
+
+        if not answer:
+
+            answer = find_library_answer(
 
                 user_question
 
