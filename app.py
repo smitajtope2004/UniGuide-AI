@@ -84,17 +84,20 @@ def call_ai(payload, timeout=180):
     Central AI backend for UniGuide AI.
 
     Local computer:
-        Uses Ollama
+        Uses Ollama.
 
     Streamlit Cloud:
-        Uses Gemini API
+        Uses Gemini API.
     """
 
-    ai_backend = os.getenv("AI_BACKEND", "ollama").lower()
+    ai_backend = os.getenv(
+    "AI_BACKEND",
+    st.secrets.get("AI_BACKEND", "ollama")
+).lower()
 
-    # -------------------------------------------------
+    # =========================================================
     # LOCAL MODE - OLLAMA
-    # -------------------------------------------------
+    # =========================================================
     if ai_backend == "ollama":
 
         try:
@@ -115,49 +118,64 @@ def call_ai(payload, timeout=180):
         except Exception:
             return None
 
-    # -------------------------------------------------
+    # =========================================================
     # CLOUD MODE - GEMINI
-    # -------------------------------------------------
-    if ai_backend == "gemini":
-
-        api_key = os.getenv("GEMINI_API_KEY", "")
-        gemini_model = os.getenv(
-            "GEMINI_MODEL",
-            "gemini-3.8-flash"
-        )
-
-        if not api_key:
-            return None
+    # =========================================================
+    elif ai_backend == "gemini":
 
         try:
+            gemini_api_key = os.getenv(
+    "GEMINI_API_KEY",
+    st.secrets.get("GEMINI_API_KEY", "")
+)
+
+            if not gemini_api_key:
+                response = requests.Response()
+                response.status_code = 500
+                response._content = b'{"error":{"message":"GEMINI_API_KEY is not configured."}}'
+                return response
+
+            gemini_model = os.getenv(
+                "GEMINI_MODEL",
+                "gemini-3.8-flash"
+            )
+
             messages = payload.get("messages", [])
 
-            system_parts = []
+            system_instruction = None
             contents = []
 
             for message in messages:
 
-                role = message.get("role")
+                role = message.get("role", "user")
                 content = message.get("content", "")
 
                 if role == "system":
-                    system_parts.append({
-                        "text": content
-                    })
 
-                elif role == "user":
-                    contents.append({
-                        "role": "user",
-                        "parts": [
-                            {"text": content}
-                        ]
-                    })
+                    if system_instruction is None:
+                        system_instruction = content
+                    else:
+                        system_instruction += "\n\n" + content
 
                 elif role == "assistant":
+
                     contents.append({
                         "role": "model",
                         "parts": [
-                            {"text": content}
+                            {
+                                "text": content
+                            }
+                        ]
+                    })
+
+                else:
+
+                    contents.append({
+                        "role": "user",
+                        "parts": [
+                            {
+                                "text": content
+                            }
                         ]
                     })
 
@@ -165,48 +183,56 @@ def call_ai(payload, timeout=180):
                 "contents": contents
             }
 
-            if system_parts:
+            if system_instruction:
+
                 gemini_payload["systemInstruction"] = {
-                    "parts": system_parts
+                    "parts": [
+                        {
+                            "text": system_instruction
+                        }
+                    ]
                 }
 
             gemini_url = (
-                f"https://generativelanguage.googleapis.com/"
+                "https://generativelanguage.googleapis.com/"
                 f"v1beta/models/{gemini_model}:generateContent"
-                f"?key={api_key}"
+                f"?key={gemini_api_key}"
             )
 
-            response = requests.post(
+            gemini_response = requests.post(
                 gemini_url,
                 json=gemini_payload,
                 timeout=timeout
             )
 
-            # If Gemini returned an error, return it directly
-            if response.status_code != 200:
-                return response
+            if gemini_response.status_code == 200:
 
-            data = response.json()
+                data = gemini_response.json()
 
-            generated_text = (
-                data["candidates"][0]
-                ["content"]["parts"][0]["text"]
-            )
+                generated_text = (
+                    data["candidates"][0]
+                    ["content"]["parts"][0]["text"]
+                )
 
-            # Create an Ollama-compatible response
-            compatible_response = requests.Response()
-            compatible_response.status_code = 200
-            compatible_response._content = json.dumps({
-                "message": {
-                    "content": generated_text
-                }
-            }).encode("utf-8")
+                # Convert Gemini response into the same
+                # structure used by the existing UniGuide code.
+                compatible_response = requests.Response()
 
-            compatible_response.headers["Content-Type"] = (
-                "application/json"
-            )
+                compatible_response.status_code = 200
 
-            return compatible_response
+                compatible_response._content = json.dumps({
+                    "message": {
+                        "content": generated_text
+                    }
+                }).encode("utf-8")
+
+                compatible_response.headers["Content-Type"] = (
+                    "application/json"
+                )
+
+                return compatible_response
+
+            return gemini_response
 
         except requests.exceptions.Timeout:
             return None
@@ -214,10 +240,34 @@ def call_ai(payload, timeout=180):
         except requests.exceptions.ConnectionError:
             return None
 
-        except Exception:
-            return None
+        except Exception as e:
 
-    return None
+            response = requests.Response()
+            response.status_code = 500
+
+            response._content = json.dumps({
+                "error": {
+                    "message": str(e)
+                }
+            }).encode("utf-8")
+
+            return response
+
+    # =========================================================
+    # UNKNOWN BACKEND
+    # =========================================================
+    else:
+
+        response = requests.Response()
+        response.status_code = 500
+
+        response._content = json.dumps({
+            "error": {
+                "message": f"Unknown AI backend: {ai_backend}"
+            }
+        }).encode("utf-8")
+
+        return response
 
 os.makedirs(DOCUMENT_FOLDER, exist_ok=True)
 
