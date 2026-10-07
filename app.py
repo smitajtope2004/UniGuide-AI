@@ -90,10 +90,7 @@ def call_ai(payload, timeout=180):
         Uses Gemini API.
     """
 
-    ai_backend = os.getenv(
-    "AI_BACKEND",
-    st.secrets.get("AI_BACKEND", "ollama")
-).lower()
+    ai_backend = st.secrets.get("AI_BACKEND", "ollama").lower()
 
     # =========================================================
     # LOCAL MODE - OLLAMA
