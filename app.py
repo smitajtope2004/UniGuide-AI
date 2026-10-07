@@ -31,46 +31,75 @@ st.set_page_config(
 )
 
 # =========================================================
+
 # PROFESSIONAL UI THEME
+
 # =========================================================
 
 st.markdown(
+
     """
+
     <style>
+
     .block-container {
+
         padding-top: 2rem;
+
         padding-bottom: 2rem;
+
         max-width: 1200px;
+
     }
 
     .main-title {
+
         font-size: 2.4rem;
+
         font-weight: 700;
+
         margin-bottom: 0.2rem;
+
     }
 
     .main-subtitle {
+
         font-size: 1rem;
+
         opacity: 0.75;
+
         margin-bottom: 1.5rem;
+
     }
 
     [data-testid="stMetric"] {
+
         border: 1px solid rgba(128, 128, 128, 0.2);
+
         border-radius: 12px;
+
         padding: 12px;
+
     }
 
     .stButton > button {
+
         border-radius: 8px;
+
     }
 
     [data-testid="stSidebar"] {
+
         border-right: 1px solid rgba(128, 128, 128, 0.15);
+
     }
+
     </style>
+
     """,
+
     unsafe_allow_html=True
+
 )
 
 DOCUMENT_FOLDER = "documents"
@@ -80,15 +109,7 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL_NAME = "gemma3:1b"
 
 def call_ai(payload, timeout=180):
-    """
-    Central AI backend for UniGuide AI.
-
-    Local computer:
-        Uses Ollama.
-
-    Streamlit Cloud:
-        Uses Gemini API.
-    """
+    """Central AI backend for local Ollama and cloud Gemini."""
 
     try:
         ai_backend = st.secrets.get("AI_BACKEND")
@@ -100,105 +121,73 @@ def call_ai(payload, timeout=180):
 
     ai_backend = str(ai_backend).strip().lower()
 
-    # =========================================================
-    # LOCAL MODE - OLLAMA
-    # =========================================================
     if ai_backend == "ollama":
-
         try:
-            response = requests.post(
+            return requests.post(
                 OLLAMA_URL,
                 json=payload,
                 timeout=timeout
             )
-
-            return response
-
-        except requests.exceptions.ConnectionError:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             return None
-
-        except requests.exceptions.Timeout:
-            return None
-
         except Exception:
             return None
 
-    # =========================================================
-    # CLOUD MODE - GEMINI
-    # =========================================================
-    elif ai_backend == "gemini":
-
+    if ai_backend == "gemini":
         try:
             try:
-                gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+                gemini_api_key = st.secrets.get("GEMINI_API_KEY")
             except Exception:
+                gemini_api_key = None
+
+            if not gemini_api_key:
                 gemini_api_key = os.getenv("GEMINI_API_KEY", "")
 
             if not gemini_api_key:
                 response = requests.Response()
                 response.status_code = 500
-                response._content = b'{"error":{"message":"GEMINI_API_KEY is not configured."}}'
+                response._content = json.dumps({
+                    "error": {"message": "GEMINI_API_KEY is not configured."}
+                }).encode("utf-8")
                 return response
 
             try:
-                gemini_model = st.secrets.get("GEMINI_MODEL", "")
+                gemini_model = st.secrets.get("GEMINI_MODEL")
             except Exception:
-                gemini_model = os.getenv("GEMINI_MODEL", "")
+                gemini_model = None
 
             if not gemini_model:
-                gemini_model = "gemini-2.5-flash"
+                gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
             messages = payload.get("messages", [])
-
             system_instruction = None
             contents = []
 
             for message in messages:
-
                 role = message.get("role", "user")
                 content = message.get("content", "")
 
                 if role == "system":
-
                     if system_instruction is None:
                         system_instruction = content
                     else:
                         system_instruction += "\n\n" + content
-
                 elif role == "assistant":
-
                     contents.append({
                         "role": "model",
-                        "parts": [
-                            {
-                                "text": content
-                            }
-                        ]
+                        "parts": [{"text": content}]
                     })
-
                 else:
-
                     contents.append({
                         "role": "user",
-                        "parts": [
-                            {
-                                "text": content
-                            }
-                        ]
+                        "parts": [{"text": content}]
                     })
 
-            gemini_payload = {
-                "contents": contents
-            }
+            gemini_payload = {"contents": contents}
 
             if system_instruction:
-
                 gemini_payload["systemInstruction"] = {
-                    "parts": [
-                        {
-                            "text": system_instruction
-                        }
-                    ]
+                    "parts": [{"text": system_instruction}]
                 }
 
             gemini_url = (
@@ -214,68 +203,37 @@ def call_ai(payload, timeout=180):
             )
 
             if gemini_response.status_code == 200:
-
                 data = gemini_response.json()
+                generated_text = data["candidates"][0]["content"]["parts"][0]["text"]
 
-                generated_text = (
-                    data["candidates"][0]
-                    ["content"]["parts"][0]["text"]
-                )
-
-                # Convert Gemini response into the same
-                # structure used by the existing UniGuide code.
                 compatible_response = requests.Response()
-
                 compatible_response.status_code = 200
-
                 compatible_response._content = json.dumps({
-                    "message": {
-                        "content": generated_text
-                    }
+                    "message": {"content": generated_text}
                 }).encode("utf-8")
-
-                compatible_response.headers["Content-Type"] = (
-                    "application/json"
-                )
-
+                compatible_response.headers["Content-Type"] = "application/json"
                 return compatible_response
 
             return gemini_response
 
         except requests.exceptions.Timeout:
             return None
-
         except requests.exceptions.ConnectionError:
             return None
-
         except Exception as e:
-
             response = requests.Response()
             response.status_code = 500
-
             response._content = json.dumps({
-                "error": {
-                    "message": str(e)
-                }
+                "error": {"message": str(e)}
             }).encode("utf-8")
-
             return response
 
-    # =========================================================
-    # UNKNOWN BACKEND
-    # =========================================================
-    else:
-
-        response = requests.Response()
-        response.status_code = 500
-
-        response._content = json.dumps({
-            "error": {
-                "message": f"Unknown AI backend: {ai_backend}"
-            }
-        }).encode("utf-8")
-
-        return response
+    response = requests.Response()
+    response.status_code = 500
+    response._content = json.dumps({
+        "error": {"message": f"Unknown AI backend: {ai_backend}"}
+    }).encode("utf-8")
+    return response
 
 os.makedirs(DOCUMENT_FOLDER, exist_ok=True)
 
@@ -374,55 +332,89 @@ exam_marks = st.sidebar.number_input(
 )
 
 # =========================================================
+
 # SUBJECT-WISE PERFORMANCE INSIGHTS
+
 # =========================================================
 
 st.sidebar.subheader("📚 Subject Performance")
 
 subject_count = st.sidebar.number_input(
+
     "Number of Subjects",
+
     min_value=1,
+
     max_value=10,
+
     value=4,
+
     step=1,
+
     key="subject_count"
+
 )
 
 subject_marks = {}
 
 for i in range(int(subject_count)):
+
     subject_name = st.sidebar.text_input(
+
         f"Subject {i + 1}",
+
         value=f"Subject {i + 1}",
+
         key=f"subject_name_{i}"
+
     )
 
     marks = st.sidebar.number_input(
+
         f"Marks - {subject_name}",
+
         min_value=0.0,
+
         max_value=100.0,
+
         value=50.0,
+
         step=1.0,
+
         key=f"subject_marks_{i}"
+
     )
 
     subject_marks[subject_name] = marks
 
 if subject_marks:
+
     performance_average = sum(subject_marks.values()) / len(subject_marks)
+
     strongest_subject = max(subject_marks, key=subject_marks.get)
+
     weakest_subject = min(subject_marks, key=subject_marks.get)
+
     subjects_needing_improvement = [
+
         name for name, marks in subject_marks.items()
+
         if marks < 60
+
     ]
+
 else:
+
     performance_average = 0
+
     strongest_subject = ""
+
     weakest_subject = ""
+
     subjects_needing_improvement = []
 
 # =========================================================
+
 # GRADE CALCULATION
 
 # =========================================================
@@ -656,6 +648,7 @@ if document_files:
 # =========================================================
 
 # =========================================================
+
 # MAIN TITLE
 
 # =========================================================
@@ -726,7 +719,7 @@ for filename in os.listdir(
 
                 chunks = re.split(
 
-                    r"(?=\d+\\.\s+[A-Za-z])",
+                    r"(?=\d+\.\s+[A-Za-z])",
 
                     text
 
@@ -1307,11 +1300,15 @@ def find_attendance_answer(question):
     lower_question = question.lower()
 
     if "attendance" not in lower_question:
+
         return None
 
     return (
+
         "The minimum required attendance "
+
         "is **75%**."
+
     )
 
 # =========================================================
@@ -1365,154 +1362,247 @@ def find_passing_answer(question):
 # =========================================================
 
 # =========================================================
+
 # MAIN APPLICATION MODULES
+
 # =========================================================
 
 tab_dashboard, tab_study, tab_chat = st.tabs(
+
     [
+
         "🏠 Student Dashboard",
+
         "📚 Study Center",
+
         "💬 UniGuide AI"
+
     ]
+
 )
 
 with tab_dashboard:
+
     # PERFORMANCE INSIGHTS
+
     # =========================================================
 
     st.header("📊 AI Student Performance Insights")
+
     st.write(
+
         "Enter subject-wise marks in the sidebar to analyze "
+
         "your academic performance."
+
     )
 
     if subject_marks:
+
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
+
             st.metric("Average Marks", f"{performance_average:.1f}%")
 
         with col2:
+
             st.metric("Strongest Subject", strongest_subject)
 
         with col3:
+
             st.metric("Needs Most Improvement", weakest_subject)
 
         with col4:
+
             st.metric(
+
                 "Subjects Below 60%",
+
                 len(subjects_needing_improvement)
+
             )
 
         st.subheader("📈 Subject-wise Performance")
 
         for name, marks in subject_marks.items():
+
             st.write(f"**{name}: {marks:.1f}%**")
+
             st.progress(int(marks))
 
         st.subheader("💡 Personalized Improvement Suggestions")
 
         if performance_average >= 80:
+
             st.success(
+
                 "Excellent performance! Keep maintaining your "
+
                 "current study routine and focus on consistency."
+
             )
+
         elif performance_average >= 60:
+
             st.info(
+
                 "Good performance. Focus on the subjects with "
+
                 "lower marks to improve your overall average."
+
             )
+
         else:
+
             st.warning(
+
                 "Your overall performance needs improvement. "
+
                 "Create a regular study schedule and give extra "
+
                 "time to weaker subjects."
+
             )
 
         if subjects_needing_improvement:
+
             st.warning(
+
                 "Focus more on: "
+
                 + ", ".join(subjects_needing_improvement)
+
             )
 
         if performance_average >= 75:
+
             st.success("🎯 Performance Status: On track")
+
         else:
+
             st.warning("🎯 Performance Status: Needs attention")
 
     # =========================================================
 
     # ACADEMIC PROGRESS TRACKER
+
     # =========================================================
 
     st.header("📈 Academic Progress Tracker")
 
     st.write(
+
         "Compare previous and current marks to understand your "
+
         "academic progress."
+
     )
 
     if subject_marks:
+
         st.subheader("📝 Enter Previous Marks")
 
         previous_marks = {}
 
         for subject, current_marks in subject_marks.items():
+
             previous_marks[subject] = st.number_input(
+
                 f"Previous Marks - {subject}",
+
                 min_value=0.0,
+
                 max_value=100.0,
+
                 value=max(0.0, current_marks - 5),
+
                 step=1.0,
+
                 key=f"previous_marks_{subject}"
+
             )
 
         if st.button(
+
             "📊 Analyze Academic Progress",
+
             use_container_width=True,
+
             key="analyze_progress"
+
         ):
+
             progress_data = []
 
             for subject in subject_marks:
+
                 previous = previous_marks[subject]
+
                 current = subject_marks[subject]
+
                 change = current - previous
 
                 if change > 0:
+
                     trend = "📈 Improved"
+
                 elif change < 0:
+
                     trend = "📉 Declined"
+
                 else:
+
                     trend = "➡️ No Change"
 
                 progress_data.append(
+
                     {
+
                         "Subject": subject,
+
                         "Previous": previous,
+
                         "Current": current,
+
                         "Change": change,
+
                         "Trend": trend
+
                     }
+
                 )
 
             st.subheader("📊 Progress Summary")
 
             for item in progress_data:
+
                 st.write(
+
                     f"**{item['Subject']}** — "
+
                     f"{item['Previous']:.1f}% → "
+
                     f"{item['Current']:.1f}% "
+
                     f"({item['Change']:+.1f}%) "
+
                     f"{item['Trend']}"
+
                 )
 
             average_previous = (
+
                 sum(previous_marks.values()) / len(previous_marks)
+
             )
+
             average_current = (
+
                 sum(subject_marks.values()) / len(subject_marks)
+
             )
+
             overall_change = average_current - average_previous
 
             st.subheader("🎯 Overall Academic Trend")
@@ -1520,55 +1610,91 @@ with tab_dashboard:
             col1, col2, col3 = st.columns(3)
 
             with col1:
+
                 st.metric("Previous Average", f"{average_previous:.1f}%")
 
             with col2:
+
                 st.metric("Current Average", f"{average_current:.1f}%")
 
             with col3:
+
                 st.metric("Overall Change", f"{overall_change:+.1f}%")
 
             if overall_change > 0:
+
                 st.success(
+
                     "📈 Your overall academic performance is improving."
+
                 )
+
             elif overall_change < 0:
+
                 st.warning(
+
                     "📉 Your overall performance has declined. "
+
                     "Focus on subjects showing a negative trend."
+
                 )
+
             else:
+
                 st.info(
+
                     "➡️ Your overall performance has remained stable."
+
                 )
 
             improved_subjects = [
+
                 subject
+
                 for subject in subject_marks
+
                 if subject_marks[subject] > previous_marks[subject]
+
             ]
 
             declining_subjects = [
+
                 subject
+
                 for subject in subject_marks
+
                 if subject_marks[subject] < previous_marks[subject]
+
             ]
 
             if improved_subjects:
+
                 st.success(
+
                     "📈 Improving subjects: "
+
                     + ", ".join(improved_subjects)
+
                 )
 
             if declining_subjects:
+
                 st.warning(
+
                     "📉 Subjects needing attention: "
+
                     + ", ".join(declining_subjects)
+
                 )
+
     else:
+
         st.info(
+
             "Enter subject-wise marks above to use the Academic "
+
             "Progress Tracker."
+
         )
 
     # STUDENT DASHBOARD
@@ -2264,6 +2390,7 @@ with tab_dashboard:
     # =========================================================
 
 with tab_study:
+
     # AI DOCUMENT SUMMARIZER
 
     # =========================================================
@@ -2355,6 +2482,7 @@ with tab_study:
     """
 
             response = call_ai(
+
     {
 
                     "model": MODEL_NAME,
@@ -2922,8 +3050,7 @@ with tab_study:
                                 {
                                     "role": "system",
                                     "content": (
-                                        "You are UniGuide AI, "
-                                        "a helpful university "
+                                        "You are UniGuide AI, a helpful university "
                                         "academic study planner."
                                     )
                                 },
@@ -2937,39 +3064,54 @@ with tab_study:
                         timeout=180
                     )
 
-                    if response is not None and response.status_code == 200:
+                    if response.status_code == 200:
 
                         data = response.json()
 
                         study_plan = (
+
                             data["message"]["content"]
+
                         )
 
                         st.success(
+
                             "🎉 Your personalized "
+
                             "study plan is ready!"
+
                         )
 
                         st.markdown(
+
                             study_plan
+
                         )
 
                         st.info(
+
                             f"📊 Total planned study time: "
+
                             f"**{total_hours} hours**"
+
                         )
 
                     else:
 
                         st.error(
+
                             "Unable to generate the study plan. "
-                            "Please check the configured AI backend."
+
+                            "Please make sure Ollama is running."
+
                         )
 
                 except Exception as e:
 
                     st.error(
-                        f"Error generating study plan: {e}"
+
+                        f"Error connecting to Ollama: {e}"
+
                     )
 
     st.divider()
@@ -2977,6 +3119,7 @@ with tab_study:
     # =========================================================
 
 with tab_chat:
+
     # CHAT SECTION
 
     # =========================================================
@@ -3260,7 +3403,6 @@ with tab_chat:
     """
 
             try:
-
                 response = call_ai(
                     {
                         "model": MODEL_NAME,
@@ -3289,36 +3431,23 @@ with tab_chat:
                 answer = f"AI error: {e}"
 
         # -----------------------------------------------------
-
-        # -----------------------------------------------------
-
         # Display answer
-
         # -----------------------------------------------------
-
         with st.chat_message("assistant"):
-
             st.markdown(answer)
 
             if contexts:
-
                 st.markdown("### 📚 Sources")
-
                 for context in contexts:
-
                     st.caption(
                         f"📄 {context['source']} "
                         f"— Page {context['page']} "
-                        f"— Relevance: "
-                        f"{context['score']:.2f}"
+                        f"— Relevance: {context['score']:.2f}"
                     )
 
         # -----------------------------------------------------
-
         # Save assistant message
-
         # -----------------------------------------------------
-
         st.session_state.messages.append(
             {
                 "role": "assistant",
@@ -3326,12 +3455,15 @@ with tab_chat:
             }
         )
 
-    # =========================================================
-
     # CLEAR CHAT
 
-    if st.button(
-        "🗑️ Clear Chat"
-    ):
-        st.session_state.messages = []
-        st.rerun()
+if st.button(
+
+    "🗑️ Clear Chat"
+
+):
+
+    st.session_state.messages = []
+
+    st.rerun()
+
