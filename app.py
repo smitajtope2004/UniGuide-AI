@@ -90,10 +90,15 @@ def call_ai(payload, timeout=180):
         Uses Gemini API.
     """
 
-    ai_backend = os.getenv(
-    "AI_BACKEND",
-    st.secrets.get("AI_BACKEND", "ollama")
-).lower()
+    try:
+        ai_backend = st.secrets.get("AI_BACKEND")
+    except Exception:
+        ai_backend = None
+
+    if not ai_backend:
+        ai_backend = os.getenv("AI_BACKEND", "ollama")
+
+    ai_backend = str(ai_backend).strip().lower()
 
     # =========================================================
     # LOCAL MODE - OLLAMA
@@ -124,10 +129,10 @@ def call_ai(payload, timeout=180):
     elif ai_backend == "gemini":
 
         try:
-            gemini_api_key = os.getenv(
-    "GEMINI_API_KEY",
-    st.secrets.get("GEMINI_API_KEY", "")
-)
+            try:
+                gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+            except Exception:
+                gemini_api_key = os.getenv("GEMINI_API_KEY", "")
 
             if not gemini_api_key:
                 response = requests.Response()
@@ -135,10 +140,13 @@ def call_ai(payload, timeout=180):
                 response._content = b'{"error":{"message":"GEMINI_API_KEY is not configured."}}'
                 return response
 
-            gemini_model = os.getenv(
-                "GEMINI_MODEL",
-                "gemini-3.8-flash"
-            )
+            try:
+                gemini_model = st.secrets.get("GEMINI_MODEL", "")
+            except Exception:
+                gemini_model = os.getenv("GEMINI_MODEL", "")
+
+            if not gemini_model:
+                gemini_model = "gemini-2.5-flash"
 
             messages = payload.get("messages", [])
 
@@ -2336,13 +2344,13 @@ with tab_study:
 
     IMPORTANT:
 
-    \- Use only information present in the document.
+    - Use only information present in the document.
 
-    \- Do not invent university rules.
+    - Do not invent university rules.
 
-    \- Keep the explanation simple and useful for students.
+    - Keep the explanation simple and useful for students.
 
-    \- Preserve important numbers and percentages.
+    - Preserve important numbers and percentages.
 
     """
 
@@ -2875,19 +2883,19 @@ with tab_study:
 
     For every day include:
 
-    1\. Topics to study
+    1. Topics to study
 
-    2\. Suggested study time
+    2. Suggested study time
 
-    3\. Practice or revision activity
+    3. Practice or revision activity
 
     The final day should include:
 
-    \- Complete revision
+    - Complete revision
 
-    \- Practice questions
+    - Practice questions
 
-    \- Mock test or self-assessment
+    - Mock test or self-assessment
 
     Make the plan realistic and easy for
 
@@ -2907,106 +2915,61 @@ with tab_study:
 
                 try:
 
-                    response = requests.post(
-
-                        OLLAMA_URL,
-
-                        json={
-
-                            "model":
-
-                            MODEL_NAME,
-
+                    response = call_ai(
+                        {
+                            "model": MODEL_NAME,
                             "messages": [
-
                                 {
-
-                                    "role":
-
-                                    "system",
-
-                                    "content":
-
-                                    "You are UniGuide AI, "
-
-                                    "a helpful university "
-
-                                    "academic study planner."
-
+                                    "role": "system",
+                                    "content": (
+                                        "You are UniGuide AI, "
+                                        "a helpful university "
+                                        "academic study planner."
+                                    )
                                 },
-
                                 {
-
-                                    "role":
-
-                                    "user",
-
-                                    "content":
-
-                                    study_prompt
-
+                                    "role": "user",
+                                    "content": study_prompt
                                 }
-
                             ],
-
-                            "stream":
-
-                            False
-
+                            "stream": False
                         },
-
                         timeout=180
-
                     )
 
-                    if response.status_code == 200:
+                    if response is not None and response.status_code == 200:
 
                         data = response.json()
 
                         study_plan = (
-
                             data["message"]["content"]
-
                         )
 
                         st.success(
-
                             "🎉 Your personalized "
-
                             "study plan is ready!"
-
                         )
 
                         st.markdown(
-
                             study_plan
-
                         )
 
                         st.info(
-
                             f"📊 Total planned study time: "
-
                             f"**{total_hours} hours**"
-
                         )
 
                     else:
 
                         st.error(
-
                             "Unable to generate the study plan. "
-
-                            "Please make sure Ollama is running."
-
+                            "Please check the configured AI backend."
                         )
 
                 except Exception as e:
 
                     st.error(
-
-                        f"Error connecting to Ollama: {e}"
-
+                        f"Error generating study plan: {e}"
                     )
 
     st.divider()
@@ -3254,13 +3217,13 @@ with tab_chat:
 
     IMPORTANT RULES:
 
-    1\. Use the provided university documents
+    1. Use the provided university documents
 
        whenever possible.
 
-    2\. Do not invent university policies.
+    2. Do not invent university policies.
 
-    3\. If the answer is not available in the
+    3. If the answer is not available in the
 
        provided documents, clearly say:
 
@@ -3268,9 +3231,9 @@ with tab_chat:
 
        in the university documents."
 
-    4\. Be concise and student-friendly.
+    4. Be concise and student-friendly.
 
-    5\. For follow-up questions, use the
+    5. For follow-up questions, use the
 
        previous conversation context.
 
@@ -3298,81 +3261,34 @@ with tab_chat:
 
             try:
 
-                response = requests.post(
-
-                    OLLAMA_URL,
-
-                    json={
-
-                        "model":
-
-                        MODEL_NAME,
-
+                response = call_ai(
+                    {
+                        "model": MODEL_NAME,
                         "messages": [
-
                             {
-
-                                "role":
-
-                                "system",
-
-                                "content":
-
-                                system_prompt
-
+                                "role": "system",
+                                "content": system_prompt
                             },
-
                             {
-
-                                "role":
-
-                                "user",
-
-                                "content":
-
-                                prompt
-
+                                "role": "user",
+                                "content": prompt
                             }
-
                         ],
-
-                        "stream":
-
-                        False
-
+                        "stream": False
                     },
-
                     timeout=120
-
                 )
 
-                if response.status_code == 200:
-
+                if response is not None and response.status_code == 200:
                     data = response.json()
-
-                    answer = (
-
-                        data["message"]["content"]
-
-                    )
-
+                    answer = data["message"]["content"]
                 else:
-
-                    answer = (
-
-                        "Sorry, I could not connect "
-
-                        "to the local AI model."
-
-                    )
+                    answer = "Sorry, I could not generate an AI response."
 
             except Exception as e:
+                answer = f"AI error: {e}"
 
-                answer = (
-
-                    f"Error connecting to Ollama: {e}"
-
-                )
+        # -----------------------------------------------------
 
         # -----------------------------------------------------
 
@@ -3380,38 +3296,21 @@ with tab_chat:
 
         # -----------------------------------------------------
 
-        with st.chat_message(
+        with st.chat_message("assistant"):
 
-            "assistant"
-
-        ):
-
-            st.markdown(
-
-                answer
-
-            )
+            st.markdown(answer)
 
             if contexts:
 
-                st.markdown(
-
-                    "### 📚 Sources"
-
-                )
+                st.markdown("### 📚 Sources")
 
                 for context in contexts:
 
                     st.caption(
-
                         f"📄 {context['source']} "
-
                         f"— Page {context['page']} "
-
                         f"— Relevance: "
-
                         f"{context['score']:.2f}"
-
                     )
 
         # -----------------------------------------------------
@@ -3421,33 +3320,18 @@ with tab_chat:
         # -----------------------------------------------------
 
         st.session_state.messages.append(
-
             {
-
-                "role":
-
-                "assistant",
-
-                "content":
-
-                answer
-
+                "role": "assistant",
+                "content": answer
             }
-
         )
 
     # =========================================================
 
     # CLEAR CHAT
 
-    # =========================================================
-
     if st.button(
-
         "🗑️ Clear Chat"
-
     ):
-
         st.session_state.messages = []
-
         st.rerun()
